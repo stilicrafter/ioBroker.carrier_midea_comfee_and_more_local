@@ -96,6 +96,9 @@
 		]
 	},
 	"native": {
+		"deviceIp": "",
+		"deviceToken": "",
+		"deviceKey": "",
 		"option1": 0,
 		"option2": "42"
 	},

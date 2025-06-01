@@ -5,20 +5,17 @@
 		"option1": {
 			"type": "text",
       "attr": "native.deviceIp",
-      "label": "Geräte-IP",
-      "input": true
+      "label": "Geräte-IP"
 		},
 		"option2": {
 			"type": "text",
 			"attr": "native.deviceToken",
-			"label": "Geräte-Token",
-			"input": true
+			"label": "Geräte-Token"
 		},
 		"option3": {
 			"type": "text",
 			"attr": "native.deviceKey",
-			"label": "Geräte-Key",
-			"input": true
+			"label": "Geräte-Key"
 		}
 	}
 }

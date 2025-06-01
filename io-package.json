@@ -59,7 +59,11 @@
 			"Rotenso",
 			"Toshiba",
 			"Vandelo",
-			"Wai-IN"
+			"Wai-IN",
+			      "midea",
+      "klima",
+      "ac",
+      "lan","split","heatpump","heatpump","climate","climatecontrol","climate-control","climate control","airconditioner","air conditioner","air conditioning","air-conditioning"
 		],
 		"licenseInformation": {
 			"type": "free",

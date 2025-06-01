@@ -19,6 +19,7 @@ class CarrierMideaComfeeAndMoreLocal extends utils.Adapter {
         this.log.info("CarrierMideaComfeeAndMoreLocal Adapter gestartet");
         this.log.debug("onReady gestartet");
         this.log.debug("Konfiguration: " + JSON.stringify(this.config));
+        this.log.info(`Admin-Konfiguration: deviceIp=${this.config.deviceIp}, deviceToken=${this.config.deviceToken}, deviceKey=${this.config.deviceKey}`);
         await this.setObjectNotExistsAsync(this.namespace + ".test", {
             type: "state",
             common: {
@@ -36,22 +37,36 @@ class CarrierMideaComfeeAndMoreLocal extends utils.Adapter {
         this.device = new MideaACDevice({
             ip: this.config.deviceIp,
             token: this.config.deviceToken,
-            key: this.config.deviceKey
+            key: this.config.deviceKey,
+            log: this.log
         });
         this.log.debug("Geräte-Objekt erzeugt: " + JSON.stringify({ip: this.config.deviceIp, token: this.config.deviceToken, key: this.config.deviceKey}));
         try {
             this.log.debug("Methoden von device: " + Object.getOwnPropertyNames(Object.getPrototypeOf(this.device)));
-            this.log.debug("Attribute von device: " + JSON.stringify(this.device));
+            // Entferne das folgende Logging, da this.device zirkuläre Referenzen enthält:
+            // this.log.debug("Attribute von device: " + JSON.stringify(this.device));
+            // Stattdessen gezielt relevante Felder loggen:
+            this.log.debug(`Device-Infos: ip=${this.device.ip}, token=${this.device.token?.toString('hex')}, key=${this.device.key?.toString('hex')}, protocol=${this.device.protocol}`);
             if (typeof this.device.connect === 'function') {
-                await this.device.connect();
-                this.log.info("Midea Gerät verbunden");
+                this.log.debug("Starte await this.device.connect() ...");
+                try {
+                    await this.device.connect();
+                    this.log.info("Midea Gerät verbunden (connect abgeschlossen)");
+                } catch (e) {
+                    this.log.error("Fehler bei device.connect: " + e);
+                    this.log.error(e.stack);
+                    return;
+                }
             } else {
                 this.log.error("device.connect ist keine Funktion!");
+                return;
             }
-            // Polling-Intervall (3 Sekunden)
+            this.log.debug("Nach device.connect, vor Polling-Setup");
+            // Polling-Intervall (10 Sekunden)
             const poll = async () => {
-                this.log.debug("Starte Statusabfrage (refreshStatus)");
+                this.log.debug("[POLL] Intervall ausgelöst");
                 try {
+                    this.log.debug("Starte Statusabfrage (refreshStatus)");
                     await this.device.refreshStatus(true);
                     this.log.debug("refreshStatus abgeschlossen, aktualisiere States");
                     const attrs = this.device.attributes || {};
@@ -101,11 +116,12 @@ class CarrierMideaComfeeAndMoreLocal extends utils.Adapter {
                     this.log.error("Fehler beim Polling/Statusabfrage: " + e);
                 }
             };
-            // Initiales Polling + Intervall
+            this.log.debug("Starte initiales Polling");
             await poll();
-            this._pollInterval = setInterval(poll, 10000);
+            this.log.debug("Setze Polling-Intervall");
+            this._pollInterval = setInterval(() => { poll().catch(e => this.log.error("Fehler im Polling-Intervall: " + e)); }, 10000);
         } catch (e) {
-            this.log.error("Fehler beim Verbinden oder Auslesen des Geräts: " + e);
+            this.log.error("Fehler im onReady-try-Block: " + e);
             this.log.error(e.stack);
         }
         this.log.debug("onReady fertig");

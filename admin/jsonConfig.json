@@ -1,24 +1,27 @@
 {
 	"i18n": true,
 	"type": "panel",
-	"items": [{
-			"type": "text",
-			"text": "Midea Adapter Konfiguration"
-		},
-		{
-			"type": "input",
-			"attr": "native.deviceIp",
-			"label": "Geräte-IP"
-		},
-		{
-			"type": "input",
-			"attr": "native.deviceToken",
-			"label": "Geräte-Token"
-		},
-		{
-			"type": "input",
-			"attr": "native.deviceKey",
-			"label": "Geräte-Key"
-		}
-	]
+	"items": {
+		"elements": [
+			{
+				"type": "text",
+				"text": "Midea Adapter Konfiguration"
+			},
+			{
+				"type": "input",
+				"attr": "native.deviceIp",
+				"label": "Geräte-IP"
+			},
+			{
+				"type": "input",
+				"attr": "native.deviceToken",
+				"label": "Geräte-Token"
+			},
+			{
+				"type": "input",
+				"attr": "native.deviceKey",
+				"label": "Geräte-Key"
+			}
+		]
+	}
 }

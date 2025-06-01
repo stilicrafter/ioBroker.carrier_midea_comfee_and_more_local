@@ -17,6 +17,7 @@ class CarrierMideaComfeeAndMoreLocal extends utils.Adapter {
 
     async onReady() {
         this.log.info("CarrierMideaComfeeAndMoreLocal Adapter gestartet");
+        this.log.debug("onReady gestartet");
         this.log.debug("Konfiguration: " + JSON.stringify(this.config));
         await this.setObjectNotExistsAsync(this.namespace + ".test", {
             type: "state",
@@ -39,7 +40,6 @@ class CarrierMideaComfeeAndMoreLocal extends utils.Adapter {
         });
         this.log.debug("Geräte-Objekt erzeugt: " + JSON.stringify({ip: this.config.deviceIp, token: this.config.deviceToken, key: this.config.deviceKey}));
         try {
-            // Test: Logge Methoden und Attribute direkt
             this.log.debug("Methoden von device: " + Object.getOwnPropertyNames(Object.getPrototypeOf(this.device)));
             this.log.debug("Attribute von device: " + JSON.stringify(this.device));
             if (typeof this.device.connect === 'function') {
@@ -48,61 +48,71 @@ class CarrierMideaComfeeAndMoreLocal extends utils.Adapter {
             } else {
                 this.log.error("device.connect ist keine Funktion!");
             }
-            if (typeof this.device.refreshStatus === 'function') {
+            // Polling-Intervall (3 Sekunden)
+            const poll = async () => {
                 this.log.debug("Starte Statusabfrage (refreshStatus)");
-                await this.device.refreshStatus();
-            } else {
-                this.log.error("device.refreshStatus ist keine Funktion!");
-            }
-            const attrs = this.device.attributes || {};
-            this.log.debug("Geräteattribute empfangen: " + JSON.stringify(attrs));
-            await this.createOrUpdateState("indoor_temperature", {
-                name: "Indoor Temperature",
-                type: "number",
-                role: "value.temperature",
-                unit: "°C",
-                value: attrs.indoor_temperature
-            });
-            await this.createOrUpdateState("indoor_humidity", {
-                name: "Indoor Humidity",
-                type: "number",
-                role: "value.humidity",
-                unit: "%",
-                value: attrs.indoor_humidity
-            });
-            await this.createOrUpdateState("power", {
-                name: "Power",
-                type: "boolean",
-                role: "switch",
-                value: attrs.power
-            });
-            await this.createOrUpdateState("mode", {
-                name: "Mode",
-                type: "string",
-                role: "text",
-                value: attrs.mode
-            });
-            await this.createOrUpdateState("target_temperature", {
-                name: "Target Temperature",
-                type: "number",
-                role: "level.temperature",
-                unit: "°C",
-                value: attrs.target_temperature
-            });
-            await this.createOrUpdateState("total_energy_consumption", {
-                name: "Total Energy Consumption",
-                type: "number",
-                role: "value.energy",
-                unit: "kWh",
-                value: attrs.total_energy_consumption
-            });
+                try {
+                    await this.device.refreshStatus(true);
+                    this.log.debug("refreshStatus abgeschlossen, aktualisiere States");
+                    const attrs = this.device.attributes || {};
+                    this.log.debug("Geräteattribute empfangen: " + JSON.stringify(attrs));
+                    await this.createOrUpdateState("indoor_temperature", {
+                        name: "Indoor Temperature",
+                        type: "number",
+                        role: "value.temperature",
+                        unit: "°C",
+                        value: attrs.indoor_temperature
+                    });
+                    await this.createOrUpdateState("indoor_humidity", {
+                        name: "Indoor Humidity",
+                        type: "number",
+                        role: "value.humidity",
+                        unit: "%",
+                        value: attrs.indoor_humidity
+                    });
+                    await this.createOrUpdateState("power", {
+                        name: "Power",
+                        type: "boolean",
+                        role: "switch",
+                        value: attrs.power
+                    });
+                    await this.createOrUpdateState("mode", {
+                        name: "Mode",
+                        type: "string",
+                        role: "text",
+                        value: attrs.mode
+                    });
+                    await this.createOrUpdateState("target_temperature", {
+                        name: "Target Temperature",
+                        type: "number",
+                        role: "level.temperature",
+                        unit: "°C",
+                        value: attrs.target_temperature
+                    });
+                    await this.createOrUpdateState("total_energy_consumption", {
+                        name: "Total Energy Consumption",
+                        type: "number",
+                        role: "value.energy",
+                        unit: "kWh",
+                        value: attrs.total_energy_consumption
+                    });
+                    this.log.debug("States aktualisiert");
+                } catch (e) {
+                    this.log.error("Fehler beim Polling/Statusabfrage: " + e);
+                }
+            };
+            // Initiales Polling + Intervall
+            await poll();
+            this._pollInterval = setInterval(poll, 10000);
         } catch (e) {
             this.log.error("Fehler beim Verbinden oder Auslesen des Geräts: " + e);
             this.log.error(e.stack);
         }
+        this.log.debug("onReady fertig");
     }
 
     async createOrUpdateState(id, options) {
+        this.log.debug(`createOrUpdateState aufgerufen für ${id} mit Wert ${options.value}`);
         await this.setObjectNotExistsAsync(this.namespace + "." + id, {
             type: "state",
             common: {
@@ -117,6 +127,7 @@ class CarrierMideaComfeeAndMoreLocal extends utils.Adapter {
         });
         if (options.value !== undefined) {
             await this.setStateAsync(this.namespace + "." + id, options.value, true);
+            this.log.debug(`setStateAsync für ${id} auf ${options.value}`);
         }
     }
 
@@ -140,6 +151,7 @@ class CarrierMideaComfeeAndMoreLocal extends utils.Adapter {
     onUnload(callback) {
         try {
             if (this.device) this.device.disconnect();
+            if (this._pollInterval) clearInterval(this._pollInterval);
             callback();
         } catch (e) {
             callback();

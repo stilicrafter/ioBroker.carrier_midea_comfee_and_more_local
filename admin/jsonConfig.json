@@ -4,21 +4,15 @@
 	"items": {
 		"deviceIp": {
 			"type": "text",
-      "oid": "native.deviceIp",
-      "label": "Geräte-IP"
+			"label": "Geräte-IP"
 		},
 		"deviceToken": {
 			"type": "text",
-			"oid": "native.deviceToken",
 			"label": "Geräte-Token"
 		},
 		"deviceKey": {
 			"type": "text",
-			"oid": "native.deviceKey",
 			"label": "Geräte-Key"
 		}
 	}
 }
-
-
-

@@ -17,7 +17,7 @@ class CarrierMideaComfeeAndMoreLocal extends utils.Adapter {
 
     async onReady() {
         this.log.info("CarrierMideaComfeeAndMoreLocal Adapter gestartet");
-        // Test: Lege einen State im Instanz-Namespace an
+        this.log.debug("Konfiguration: " + JSON.stringify(this.config));
         await this.setObjectNotExistsAsync(this.namespace + ".test", {
             type: "state",
             common: {
@@ -30,103 +30,109 @@ class CarrierMideaComfeeAndMoreLocal extends utils.Adapter {
             native: {}
         });
         await this.setStateAsync(this.namespace + ".test", 42, true);
-        // Beispiel: Gerät initialisieren
-        // Nutze MideaACDevice für Status und Temperatur
+
         const { MideaACDevice } = require("./lib/midea-device");
         this.device = new MideaACDevice({
             ip: this.config.deviceIp,
             token: this.config.deviceToken,
             key: this.config.deviceKey
         });
-        await this.device.connect();
-        this.log.info("Midea Gerät verbunden");
-        // Status abfragen
-        //await this.device.refreshStatus();
-        //Hier wird aktuell nur mit Dummy Werten gearbeitet, da keine echte Verbindung besteht. Das muss noch implementiert werden.
-        await this.setObjectNotExistsAsync(this.namespace + ".indoor_temperature", {
-            type: "state",
-            common: {
+        this.log.debug("Geräte-Objekt erzeugt: " + JSON.stringify({ip: this.config.deviceIp, token: this.config.deviceToken, key: this.config.deviceKey}));
+        try {
+            // Test: Logge Methoden und Attribute direkt
+            this.log.debug("Methoden von device: " + Object.getOwnPropertyNames(Object.getPrototypeOf(this.device)));
+            this.log.debug("Attribute von device: " + JSON.stringify(this.device));
+            if (typeof this.device.connect === 'function') {
+                await this.device.connect();
+                this.log.info("Midea Gerät verbunden");
+            } else {
+                this.log.error("device.connect ist keine Funktion!");
+            }
+            if (typeof this.device.refreshStatus === 'function') {
+                this.log.debug("Starte Statusabfrage (refreshStatus)");
+                await this.device.refreshStatus();
+            } else {
+                this.log.error("device.refreshStatus ist keine Funktion!");
+            }
+            const attrs = this.device.attributes || {};
+            this.log.debug("Geräteattribute empfangen: " + JSON.stringify(attrs));
+            await this.createOrUpdateState("indoor_temperature", {
                 name: "Indoor Temperature",
                 type: "number",
                 role: "value.temperature",
                 unit: "°C",
-                read: true,
-                write: false
-            },
-            native: {}
-        });
-        await this.setObjectNotExistsAsync(this.namespace + ".indoor_humidity", {
-            type: "state",
-            common: {
+                value: attrs.indoor_temperature
+            });
+            await this.createOrUpdateState("indoor_humidity", {
                 name: "Indoor Humidity",
                 type: "number",
                 role: "value.humidity",
                 unit: "%",
-                read: true,
-                write: false
-            },
-            native: {}
-        });
-        await this.setObjectNotExistsAsync(this.namespace + ".power", {
-            type: "state",
-            common: {
+                value: attrs.indoor_humidity
+            });
+            await this.createOrUpdateState("power", {
                 name: "Power",
                 type: "boolean",
                 role: "switch",
-                read: true,
-                write: true
-            },
-            native: {}
-        });
-        await this.setObjectNotExistsAsync(this.namespace + ".mode", {
-            type: "state",
-            common: {
+                value: attrs.power
+            });
+            await this.createOrUpdateState("mode", {
                 name: "Mode",
                 type: "string",
                 role: "text",
-                read: true,
-                write: true
-            },
-            native: {}
-        });
-        await this.setObjectNotExistsAsync(this.namespace + ".target_temperature", {
-            type: "state",
-            common: {
+                value: attrs.mode
+            });
+            await this.createOrUpdateState("target_temperature", {
                 name: "Target Temperature",
                 type: "number",
                 role: "level.temperature",
                 unit: "°C",
-                read: true,
-                write: true
-            },
-            native: {}
-        });
-        await this.setObjectNotExistsAsync(this.namespace + ".total_energy_consumption", {
-            type: "state",
-            common: {
+                value: attrs.target_temperature
+            });
+            await this.createOrUpdateState("total_energy_consumption", {
                 name: "Total Energy Consumption",
                 type: "number",
                 role: "value.energy",
                 unit: "kWh",
+                value: attrs.total_energy_consumption
+            });
+        } catch (e) {
+            this.log.error("Fehler beim Verbinden oder Auslesen des Geräts: " + e);
+            this.log.error(e.stack);
+        }
+    }
+
+    async createOrUpdateState(id, options) {
+        await this.setObjectNotExistsAsync(this.namespace + "." + id, {
+            type: "state",
+            common: {
+                name: options.name,
+                type: options.type,
+                role: options.role,
+                unit: options.unit || undefined,
                 read: true,
-                write: false
+                write: ["power", "mode", "target_temperature"].includes(id)
             },
             native: {}
         });
-        // Dummywerte setzen (hier später echte Werte aus device.attributes)
-        await this.setStateAsync(this.namespace + ".indoor_temperature", 22.5, true);
-        await this.setStateAsync(this.namespace + ".indoor_humidity", 45, true);
-        await this.setStateAsync(this.namespace + ".power", true, true);
-        await this.setStateAsync(this.namespace + ".mode", "cool", true);
-        await this.setStateAsync(this.namespace + ".target_temperature", 24, true);
-        await this.setStateAsync(this.namespace + ".total_energy_consumption", 12.3, true);
+        if (options.value !== undefined) {
+            await this.setStateAsync(this.namespace + "." + id, options.value, true);
+        }
     }
 
     async onStateChange(id, state) {
         if (!state || state.ack) return;
-        // Temperatur setzen
-        if (id.endsWith("setTemperature")) {
+        // Beispiel: Temperatur setzen
+        if (id.endsWith("target_temperature")) {
             await this.device.setTemperature(state.val);
+            this.setState(id, state.val, true);
+        }
+        if (id.endsWith("power")) {
+            await this.device.setPower(state.val);
+            this.setState(id, state.val, true);
+        }
+        if (id.endsWith("mode")) {
+            await this.device.setMode(state.val);
             this.setState(id, state.val, true);
         }
     }

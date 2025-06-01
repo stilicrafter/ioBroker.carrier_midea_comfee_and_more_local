@@ -7,17 +7,17 @@
 			"text": "Midea Adapter Konfiguration"
 		},
 		{
-			"type": "input",
+			"type": "text",
 			"attr": "native.deviceIp",
 			"label": "Geräte-IP"
 		},
 		{
-			"type": "input",
+			"type": "text",
 			"attr": "native.deviceToken",
 			"label": "Geräte-Token"
 		},
 		{
-			"type": "input",
+			"type": "text",
 			"attr": "native.deviceKey",
 			"label": "Geräte-Key"
 		}

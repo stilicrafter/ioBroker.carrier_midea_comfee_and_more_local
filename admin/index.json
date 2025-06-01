@@ -7,17 +7,16 @@
       "type": "text",
       "attr": "native.deviceIp",
       "label": "Geräte-IP"
-    },"Geräte-Token": {
+    },
+    "Geräte-Token": {
       "type": "text",
       "attr": "native.deviceToken",
-      "label": "Geräte-Token
-
-
-  },
-  "Geräte-Key": {
-    "type": "text",
-    "attr": "native.deviceKey",
-    "label": "Geräte-Key"
+      "label": "Geräte-Token"
+    },
+    "Geräte-Key": {
+      "type": "text",
+      "attr": "native.deviceKey",
+      "label": "Geräte-Key"
   }
   
 }

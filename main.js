@@ -17,7 +17,7 @@ class CarrierMideaComfeeAndMoreLocal extends utils.Adapter {
 
     async onReady() {
         this.log.info("CarrierMideaComfeeAndMoreLocal Adapter gestartet");
-        // Test-State (bleibt zu Debugzwecken)
+        // Test: Lege einen State im Instanz-Namespace an
         await this.setObjectNotExistsAsync(this.namespace + ".test", {
             type: "state",
             common: {
@@ -30,97 +30,103 @@ class CarrierMideaComfeeAndMoreLocal extends utils.Adapter {
             native: {}
         });
         await this.setStateAsync(this.namespace + ".test", 42, true);
-
-        // Gerät initialisieren
+        // Beispiel: Gerät initialisieren
+        // Nutze MideaACDevice für Status und Temperatur
         const { MideaACDevice } = require("./lib/midea-device");
         this.device = new MideaACDevice({
             ip: this.config.deviceIp,
             token: this.config.deviceToken,
             key: this.config.deviceKey
         });
-        try {
-            await this.device.connect();
-            this.log.info("Midea Gerät verbunden");
-            // Status dynamisch abrufen
-            await this.device.refreshStatus();
-            const attrs = this.device.attributes || {};
-            // States dynamisch anlegen und befüllen
-            await this.createOrUpdateState("indoor_temperature", {
+        await this.device.connect();
+        this.log.info("Midea Gerät verbunden");
+        // Status abfragen
+        //await this.device.refreshStatus();
+        //Hier wird aktuell nur mit Dummy Werten gearbeitet, da keine echte Verbindung besteht. Das muss noch implementiert werden.
+        await this.setObjectNotExistsAsync(this.namespace + ".indoor_temperature", {
+            type: "state",
+            common: {
                 name: "Indoor Temperature",
                 type: "number",
                 role: "value.temperature",
                 unit: "°C",
-                value: attrs.indoor_temperature
-            });
-            await this.createOrUpdateState("indoor_humidity", {
+                read: true,
+                write: false
+            },
+            native: {}
+        });
+        await this.setObjectNotExistsAsync(this.namespace + ".indoor_humidity", {
+            type: "state",
+            common: {
                 name: "Indoor Humidity",
                 type: "number",
                 role: "value.humidity",
                 unit: "%",
-                value: attrs.indoor_humidity
-            });
-            await this.createOrUpdateState("power", {
+                read: true,
+                write: false
+            },
+            native: {}
+        });
+        await this.setObjectNotExistsAsync(this.namespace + ".power", {
+            type: "state",
+            common: {
                 name: "Power",
                 type: "boolean",
                 role: "switch",
-                value: attrs.power
-            });
-            await this.createOrUpdateState("mode", {
+                read: true,
+                write: true
+            },
+            native: {}
+        });
+        await this.setObjectNotExistsAsync(this.namespace + ".mode", {
+            type: "state",
+            common: {
                 name: "Mode",
                 type: "string",
                 role: "text",
-                value: attrs.mode
-            });
-            await this.createOrUpdateState("target_temperature", {
+                read: true,
+                write: true
+            },
+            native: {}
+        });
+        await this.setObjectNotExistsAsync(this.namespace + ".target_temperature", {
+            type: "state",
+            common: {
                 name: "Target Temperature",
                 type: "number",
                 role: "level.temperature",
                 unit: "°C",
-                value: attrs.target_temperature
-            });
-            await this.createOrUpdateState("total_energy_consumption", {
+                read: true,
+                write: true
+            },
+            native: {}
+        });
+        await this.setObjectNotExistsAsync(this.namespace + ".total_energy_consumption", {
+            type: "state",
+            common: {
                 name: "Total Energy Consumption",
                 type: "number",
                 role: "value.energy",
                 unit: "kWh",
-                value: attrs.total_energy_consumption
-            });
-        } catch (e) {
-            this.log.error("Fehler beim Verbinden oder Auslesen des Geräts: " + e);
-        }
-    }
-
-    async createOrUpdateState(id, options) {
-        await this.setObjectNotExistsAsync(this.namespace + "." + id, {
-            type: "state",
-            common: {
-                name: options.name,
-                type: options.type,
-                role: options.role,
-                unit: options.unit || undefined,
                 read: true,
-                write: ["power", "mode", "target_temperature"].includes(id)
+                write: false
             },
             native: {}
         });
-        if (options.value !== undefined) {
-            await this.setStateAsync(this.namespace + "." + id, options.value, true);
-        }
+        // Dummywerte setzen (hier später echte Werte aus device.attributes)
+        await this.setStateAsync(this.namespace + ".indoor_temperature", 22.5, true);
+        await this.setStateAsync(this.namespace + ".indoor_humidity", 45, true);
+        await this.setStateAsync(this.namespace + ".power", true, true);
+        await this.setStateAsync(this.namespace + ".mode", "cool", true);
+        await this.setStateAsync(this.namespace + ".target_temperature", 24, true);
+        await this.setStateAsync(this.namespace + ".total_energy_consumption", 12.3, true);
     }
 
     async onStateChange(id, state) {
         if (!state || state.ack) return;
-        // Beispiel: Temperatur setzen
-        if (id.endsWith("target_temperature")) {
+        // Temperatur setzen
+        if (id.endsWith("setTemperature")) {
             await this.device.setTemperature(state.val);
-            this.setState(id, state.val, true);
-        }
-        if (id.endsWith("power")) {
-            await this.device.setPower(state.val);
-            this.setState(id, state.val, true);
-        }
-        if (id.endsWith("mode")) {
-            await this.device.setMode(state.val);
             this.setState(id, state.val, true);
         }
     }

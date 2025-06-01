@@ -2,21 +2,23 @@
 	"i18n": true,
 	"type": "panel",
 	"items": {
-
     "Geräte-IP": {
       "type": "text",
       "attr": "native.deviceIp",
-      "label": "Geräte-IP"
+      "label": "Geräte-IP",
+      "input": true
     },
     "Geräte-Token": {
       "type": "text",
       "attr": "native.deviceToken",
-      "label": "Geräte-Token"
+      "label": "Geräte-Token",
+      "input": true
     },
     "Geräte-Key": {
       "type": "text",
       "attr": "native.deviceKey",
-      "label": "Geräte-Key"
-  }
+      "label": "Geräte-Key",
+      "input": true
+    }
   }
 }

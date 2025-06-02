@@ -83,6 +83,55 @@ class CarrierMideaComfeeAndMoreLocal extends utils.Adapter {
 
 		result = await this.checkGroupAsync("admin", "admin");
 		this.log.info("check group user admin group admin: " + result);
+
+		// === AC State Definitions ===
+		const acStates = [
+		  { id: "power", name: "Power", type: "boolean", role: "switch.power" },
+		  { id: "mode", name: "Mode", type: "number", role: "level.mode" },
+		  { id: "target_temperature", name: "Target Temperature", type: "number", role: "level.temperature" },
+		  { id: "indoor_temperature", name: "Indoor Temperature", type: "number", role: "value.temperature" },
+		  { id: "outdoor_temperature", name: "Outdoor Temperature", type: "number", role: "value.temperature" },
+		  { id: "fan_speed", name: "Fan Speed", type: "number", role: "level.speed" },
+		  { id: "swing_mode", name: "Swing Mode", type: "number", role: "level.mode.swing" },
+		  { id: "eco_mode", name: "Eco Mode", type: "boolean", role: "switch.eco" },
+		  { id: "turbo_mode", name: "Turbo Mode", type: "boolean", role: "switch.turbo" },
+		  { id: "available", name: "Available", type: "boolean", role: "indicator.reachable" }
+		];
+
+		// States anlegen
+		for (const s of acStates) {
+		  await this.setObjectNotExistsAsync(s.id, {
+		    type: "state",
+		    common: {
+		      name: s.name,
+		      type: s.type,
+		      role: s.role,
+		      read: true,
+		      write: true
+		    },
+		    native: {},
+		  });
+		}
+
+		// Beispiel: Status-Update vom Gerät simulieren (hier Dummy, später durch echtes Device ersetzen)
+		const dummyStatus = {
+		  power: true,
+		  mode: 2,
+		  target_temperature: 24,
+		  indoor_temperature: 22.5,
+		  outdoor_temperature: 18.0,
+		  fan_speed: 80,
+		  swing_mode: 12,
+		  eco_mode: false,
+		  turbo_mode: true,
+		  available: true
+		};
+
+		for (const s of acStates) {
+		  if (dummyStatus[s.id] !== undefined) {
+		    await this.setStateAsync(s.id, { val: dummyStatus[s.id], ack: true });
+		  }
+		}
 	}
 
 	/**

@@ -7,12 +7,12 @@ const { AirConditioner, OperationalMode, FanSpeed, SwingMode } = require('../src
 // Replace these values with your actual device information
 const deviceConfig = {
   name: 'Living Room AC',
-  deviceId: 123456789, // Replace with your device ID
-  ipAddress: '192.168.1.100', // Replace with your device IP
+  deviceId: 3456, // Replace with your device ID
+  ipAddress: '10.10.10.148', // Replace with your device IP
   port: 6444,
-  token: 'abcdef1234567890', // Replace with your device token
-  key: '1234567890abcdef', // Replace with your device key
-  protocol: 3
+  token: 'xyz', // Replace with your device token
+  key: '123', // Replace with your device key
+  protocol: 2
 };
 
 // Create air conditioner instance

@@ -1,3 +1,5 @@
+//TODO: Loggen von Auth - Warum zu kurz?
+
 // Entferne die Klasse Midea und verwende nur CarrierMideaComfeeAndMoreLocal
 const utils = require("@iobroker/adapter-core");
 

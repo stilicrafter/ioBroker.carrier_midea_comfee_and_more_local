@@ -7,6 +7,7 @@
 // The adapter-core module gives you access to the core ioBroker functions
 // you need to create an adapter
 const utils = require("@iobroker/adapter-core");
+const { AirConditioner } = require('./src/devices/air-conditioner');
 
 // Load your modules here, e.g.:
 // const fs = require("fs");
@@ -48,7 +49,7 @@ class CarrierMideaComfeeAndMoreLocal extends utils.Adapter {
 			type: "state",
 			common: {
 				name: "testVariable",
-				type: "boolean",
+				type: "boolean", // "boolean" is a valid CommonType
 				role: "indicator",
 				read: true,
 				write: true,
@@ -98,7 +99,6 @@ class CarrierMideaComfeeAndMoreLocal extends utils.Adapter {
 		  { id: "available", name: "Available", type: "boolean", role: "indicator.reachable" }
 		];
 
-		// States anlegen
 		for (const s of acStates) {
 		  await this.setObjectNotExistsAsync(s.id, {
 		    type: "state",
@@ -113,25 +113,35 @@ class CarrierMideaComfeeAndMoreLocal extends utils.Adapter {
 		  });
 		}
 
-		// Beispiel: Status-Update vom Gerät simulieren (hier Dummy, später durch echtes Device ersetzen)
-		const dummyStatus = {
-		  power: true,
-		  mode: 2,
-		  target_temperature: 24,
-		  indoor_temperature: 22.5,
-		  outdoor_temperature: 18.0,
-		  fan_speed: 80,
-		  swing_mode: 12,
-		  eco_mode: false,
-		  turbo_mode: true,
-		  available: true
+		// Device-Konfiguration (später aus Adapter-Konfiguration holen!)
+		const deviceConfig = {
+		  name: 'Living Room AC',
+		  deviceId: 146235046529115, // TODO: Aus Config holen
+		  ipAddress: '10.10.10.148',
+		  port: 6444,
+		  token: '512d9bf9017dd26aebef222227c9570e7ad0f589e55aa76c4b9d35d44c64505a754660365620ecf9431c4a31a6394b1c959898c31efff5eedd8ff02bdca50c7a',
+		  key: '93b236c3c0734f7db135df585966edcc9ad71753f089445caccec8db6d783181',
+		  protocol: 2
 		};
 
-		for (const s of acStates) {
-		  if (dummyStatus[s.id] !== undefined) {
-		    await this.setStateAsync(s.id, { val: dummyStatus[s.id], ack: true });
+		const ac = new AirConditioner(deviceConfig);
+
+		// Status-Update Callback: Schreibe alle Werte in ioBroker
+		ac.registerUpdate(async (status) => {
+		  for (const s of acStates) {
+		    if (status[s.id] !== undefined) {
+		      await this.setStateAsync(s.id, { val: status[s.id], ack: true });
+		    }
 		  }
-		}
+		});
+
+		// Verbindung aufbauen
+		ac.open();
+
+		// Optional: zyklisch Status abfragen (z.B. alle 30s)
+		setInterval(() => {
+		  if (ac.refreshStatus) ac.refreshStatus();
+		}, 30000);
 	}
 
 	/**

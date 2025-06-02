@@ -2,15 +2,17 @@
 	"i18n": true,
 	"type": "panel",
 	"items": {
-		"option1": {
-			"type": "number",
-			"label": "option1",
-			"newLine": true
-		},
-		"option2": {
+		"deviceIp": {
 			"type": "text",
-			"label": "option2",
-			"newLine": true
+			"label": "Geräte-IP"
+		},
+		"deviceToken": {
+			"type": "text",
+			"label": "Geräte-Token"
+		},
+		"deviceKey": {
+			"type": "text",
+			"label": "Geräte-Key"
 		}
 	}
 }

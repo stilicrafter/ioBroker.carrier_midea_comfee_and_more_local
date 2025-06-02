@@ -1,167 +1,186 @@
-"use strict";
+//TODO: Loggen von Auth - Warum zu kurz?
 
-/*
- * Created with @iobroker/create-adapter v2.6.5
- */
-
-// The adapter-core module gives you access to the core ioBroker functions
-// you need to create an adapter
+// Entferne die Klasse Midea und verwende nur CarrierMideaComfeeAndMoreLocal
 const utils = require("@iobroker/adapter-core");
 
-// Load your modules here, e.g.:
-// const fs = require("fs");
-
 class CarrierMideaComfeeAndMoreLocal extends utils.Adapter {
+    /**
+     * @param {Partial<utils.AdapterOptions>} [options={}]
+     */
+    constructor(options = {}) {
+        super({
+            ...options,
+            name: "carrier_midea_comfee_and_more_local",
+        });
+        this.on("ready", this.onReady.bind(this));
+        this.on("stateChange", this.onStateChange.bind(this));
+        this.on("unload", this.onUnload.bind(this));
+    }
 
-	/**
-	 * @param {Partial<utils.AdapterOptions>} [options={}]
-	 */
-	constructor(options) {
-		super({
-			...options,
-			name: "carrier_midea_comfee_and_more_local",
-		});
-		this.on("ready", this.onReady.bind(this));
-		this.on("stateChange", this.onStateChange.bind(this));
-		// this.on("objectChange", this.onObjectChange.bind(this));
-		// this.on("message", this.onMessage.bind(this));
-		this.on("unload", this.onUnload.bind(this));
-	}
+    async onReady() {
+        this.log.info("CarrierMideaComfeeAndMoreLocal Adapter gestartet");
+        this.log.debug("onReady gestartet");
+        this.log.debug("Konfiguration: " + JSON.stringify(this.config));
+        this.log.info(`Admin-Konfiguration: deviceIp=${this.config.deviceIp}, deviceToken=${this.config.deviceToken}, deviceKey=${this.config.deviceKey}`);
+        await this.setObjectNotExistsAsync(this.namespace + ".test", {
+            type: "state",
+            common: {
+                name: "Test State",
+                type: "number",
+                role: "value",
+                read: true,
+                write: true
+            },
+            native: {}
+        });
+        await this.setStateAsync(this.namespace + ".test", 42, true);
 
-	/**
-	 * Is called when databases are connected and adapter received configuration.
-	 */
-	async onReady() {
-		// Initialize your adapter here
+        const { MideaACDevice } = require("./lib/midea-device");
+        this.device = new MideaACDevice({
+            ip: this.config.deviceIp,
+            token: this.config.deviceToken,
+            key: this.config.deviceKey,
+            log: this.log
+        });
+        this.log.debug("Geräte-Objekt erzeugt: " + JSON.stringify({ip: this.config.deviceIp, token: this.config.deviceToken, key: this.config.deviceKey}));
+        try {
+            this.log.debug("Methoden von device: " + Object.getOwnPropertyNames(Object.getPrototypeOf(this.device)));
+            // Entferne das folgende Logging, da this.device zirkuläre Referenzen enthält:
+            // this.log.debug("Attribute von device: " + JSON.stringify(this.device));
+            // Stattdessen gezielt relevante Felder loggen:
+            this.log.debug(`Device-Infos: ip=${this.device.ip}, token=${this.device.token?.toString('hex')}, key=${this.device.key?.toString('hex')}, protocol=${this.device.protocol}`);
+            if (typeof this.device.connect === 'function') {
+                this.log.debug("Starte await this.device.connect() ...");
+                try {
+                    await this.device.connect();
+                    this.log.info("Midea Gerät verbunden (connect abgeschlossen)");
+                } catch (e) {
+                    this.log.error("Fehler bei device.connect: " + e);
+                    this.log.error(e.stack);
+                    return;
+                }
+            } else {
+                this.log.error("device.connect ist keine Funktion!");
+                return;
+            }
+            this.log.debug("Nach device.connect, vor Polling-Setup");
+            // Polling-Intervall (10 Sekunden)
+            const poll = async () => {
+                this.log.debug("[POLL] Intervall ausgelöst");
+                try {
+                    this.log.debug("Starte Statusabfrage (refreshStatus)");
+                    await this.device.refreshStatus(true);
+                    this.log.debug("refreshStatus abgeschlossen, aktualisiere States");
+                    const attrs = this.device.attributes || {};
+                    this.log.debug("Geräteattribute empfangen: " + JSON.stringify(attrs));
+                    await this.createOrUpdateState("indoor_temperature", {
+                        name: "Indoor Temperature",
+                        type: "number",
+                        role: "value.temperature",
+                        unit: "°C",
+                        value: attrs.indoor_temperature
+                    });
+                    await this.createOrUpdateState("indoor_humidity", {
+                        name: "Indoor Humidity",
+                        type: "number",
+                        role: "value.humidity",
+                        unit: "%",
+                        value: attrs.indoor_humidity
+                    });
+                    await this.createOrUpdateState("power", {
+                        name: "Power",
+                        type: "boolean",
+                        role: "switch",
+                        value: attrs.power
+                    });
+                    await this.createOrUpdateState("mode", {
+                        name: "Mode",
+                        type: "string",
+                        role: "text",
+                        value: attrs.mode
+                    });
+                    await this.createOrUpdateState("target_temperature", {
+                        name: "Target Temperature",
+                        type: "number",
+                        role: "level.temperature",
+                        unit: "°C",
+                        value: attrs.target_temperature
+                    });
+                    await this.createOrUpdateState("total_energy_consumption", {
+                        name: "Total Energy Consumption",
+                        type: "number",
+                        role: "value.energy",
+                        unit: "kWh",
+                        value: attrs.total_energy_consumption
+                    });
+                    this.log.debug("States aktualisiert");
+                } catch (e) {
+                    this.log.error("Fehler beim Polling/Statusabfrage: " + e);
+                }
+            };
+            this.log.debug("Starte initiales Polling");
+            await poll();
+            this.log.debug("Setze Polling-Intervall");
+            this._pollInterval = setInterval(() => { poll().catch(e => this.log.error("Fehler im Polling-Intervall: " + e)); }, 10000);
+        } catch (e) {
+            this.log.error("Fehler im onReady-try-Block: " + e);
+            this.log.error(e.stack);
+        }
+        this.log.debug("onReady fertig");
+    }
 
-		// The adapters config (in the instance object everything under the attribute "native") is accessible via
-		// this.config:
-		this.log.info("config option1: " + this.config.option1);
-		this.log.info("config option2: " + this.config.option2);
+    async createOrUpdateState(id, options) {
+        this.log.debug(`createOrUpdateState aufgerufen für ${id} mit Wert ${options.value}`);
+        await this.setObjectNotExistsAsync(this.namespace + "." + id, {
+            type: "state",
+            common: {
+                name: options.name,
+                type: options.type,
+                role: options.role,
+                unit: options.unit || undefined,
+                read: true,
+                write: ["power", "mode", "target_temperature"].includes(id)
+            },
+            native: {}
+        });
+        if (options.value !== undefined) {
+            await this.setStateAsync(this.namespace + "." + id, options.value, true);
+            this.log.debug(`setStateAsync für ${id} auf ${options.value}`);
+        }
+    }
 
-		/*
-		For every state in the system there has to be also an object of type state
-		Here a simple template for a boolean variable named "testVariable"
-		Because every adapter instance uses its own unique namespace variable names can't collide with other adapters variables
-		*/
-		await this.setObjectNotExistsAsync("testVariable", {
-			type: "state",
-			common: {
-				name: "testVariable",
-				type: "boolean",
-				role: "indicator",
-				read: true,
-				write: true,
-			},
-			native: {},
-		});
+    async onStateChange(id, state) {
+        if (!state || state.ack) return;
+        // Beispiel: Temperatur setzen
+        if (id.endsWith("target_temperature")) {
+            await this.device.setTemperature(state.val);
+            this.setState(id, state.val, true);
+        }
+        if (id.endsWith("power")) {
+            await this.device.setPower(state.val);
+            this.setState(id, state.val, true);
+        }
+        if (id.endsWith("mode")) {
+            await this.device.setMode(state.val);
+            this.setState(id, state.val, true);
+        }
+    }
 
-		// In order to get state updates, you need to subscribe to them. The following line adds a subscription for our variable we have created above.
-		this.subscribeStates("testVariable");
-		// You can also add a subscription for multiple states. The following line watches all states starting with "lights."
-		// this.subscribeStates("lights.*");
-		// Or, if you really must, you can also watch all states. Don't do this if you don't need to. Otherwise this will cause a lot of unnecessary load on the system:
-		// this.subscribeStates("*");
-
-		/*
-			setState examples
-			you will notice that each setState will cause the stateChange event to fire (because of above subscribeStates cmd)
-		*/
-		// the variable testVariable is set to true as command (ack=false)
-		await this.setStateAsync("testVariable", true);
-
-		// same thing, but the value is flagged "ack"
-		// ack should be always set to true if the value is received from or acknowledged from the target system
-		await this.setStateAsync("testVariable", { val: true, ack: true });
-
-		// same thing, but the state is deleted after 30s (getState will return null afterwards)
-		await this.setStateAsync("testVariable", { val: true, ack: true, expire: 30 });
-
-		// examples for the checkPassword/checkGroup functions
-		let result = await this.checkPasswordAsync("admin", "iobroker");
-		this.log.info("check user admin pw iobroker: " + result);
-
-		result = await this.checkGroupAsync("admin", "admin");
-		this.log.info("check group user admin group admin: " + result);
-	}
-
-	/**
-	 * Is called when adapter shuts down - callback has to be called under any circumstances!
-	 * @param {() => void} callback
-	 */
-	onUnload(callback) {
-		try {
-			// Here you must clear all timeouts or intervals that may still be active
-			// clearTimeout(timeout1);
-			// clearTimeout(timeout2);
-			// ...
-			// clearInterval(interval1);
-
-			callback();
-		} catch (e) {
-			callback();
-		}
-	}
-
-	// If you need to react to object changes, uncomment the following block and the corresponding line in the constructor.
-	// You also need to subscribe to the objects with `this.subscribeObjects`, similar to `this.subscribeStates`.
-	// /**
-	//  * Is called if a subscribed object changes
-	//  * @param {string} id
-	//  * @param {ioBroker.Object | null | undefined} obj
-	//  */
-	// onObjectChange(id, obj) {
-	// 	if (obj) {
-	// 		// The object was changed
-	// 		this.log.info(`object ${id} changed: ${JSON.stringify(obj)}`);
-	// 	} else {
-	// 		// The object was deleted
-	// 		this.log.info(`object ${id} deleted`);
-	// 	}
-	// }
-
-	/**
-	 * Is called if a subscribed state changes
-	 * @param {string} id
-	 * @param {ioBroker.State | null | undefined} state
-	 */
-	onStateChange(id, state) {
-		if (state) {
-			// The state was changed
-			this.log.info(`state ${id} changed: ${state.val} (ack = ${state.ack})`);
-		} else {
-			// The state was deleted
-			this.log.info(`state ${id} deleted`);
-		}
-	}
-
-	// If you need to accept messages in your adapter, uncomment the following block and the corresponding line in the constructor.
-	// /**
-	//  * Some message was sent to this instance over message box. Used by email, pushover, text2speech, ...
-	//  * Using this method requires "common.messagebox" property to be set to true in io-package.json
-	//  * @param {ioBroker.Message} obj
-	//  */
-	// onMessage(obj) {
-	// 	if (typeof obj === "object" && obj.message) {
-	// 		if (obj.command === "send") {
-	// 			// e.g. send email or pushover or whatever
-	// 			this.log.info("send command");
-
-	// 			// Send response in callback if required
-	// 			if (obj.callback) this.sendTo(obj.from, obj.command, "Message received", obj.callback);
-	// 		}
-	// 	}
-	// }
-
+    onUnload(callback) {
+        try {
+            if (this.device) this.device.disconnect();
+            if (this._pollInterval) clearInterval(this._pollInterval);
+            callback();
+        } catch (e) {
+            callback();
+        }
+    }
 }
 
 if (require.main !== module) {
-	// Export the constructor in compact mode
-	/**
-	 * @param {Partial<utils.AdapterOptions>} [options={}]
-	 */
-	module.exports = (options) => new CarrierMideaComfeeAndMoreLocal(options);
+    // Export the constructor in compact mode
+    module.exports = (options) => new CarrierMideaComfeeAndMoreLocal(options);
 } else {
-	// otherwise start the instance directly
-	new CarrierMideaComfeeAndMoreLocal();
+    // otherwise start the instance directly
+    new CarrierMideaComfeeAndMoreLocal();
 }

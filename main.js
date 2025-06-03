@@ -22,6 +22,8 @@ class CarrierMideaComfeeAndMoreLocal extends utils.Adapter {
 			...options,
 			name: "carrier_midea_comfee_and_more_local",
 		});
+		// ACHTUNG: this.log ist im Konstruktor noch nicht verfügbar!
+		// Logging erst ab onReady oder später verwenden!
 		this.on("ready", this.onReady.bind(this));
 		this.on("stateChange", this.onStateChange.bind(this));
 		// this.on("objectChange", this.onObjectChange.bind(this));
@@ -33,12 +35,10 @@ class CarrierMideaComfeeAndMoreLocal extends utils.Adapter {
 	 * Is called when databases are connected and adapter received configuration.
 	 */
 	async onReady() {
-		// Initialize your adapter here
+		this.log.silly("[onReady] called", { config: this.config });
 
-		// The adapters config (in the instance object everything under the attribute "native") is accessible via
-		// this.config:
-		this.log.info("config option1: " + this.config.option1);
-		this.log.info("config option2: " + this.config.option2);
+		this.log.silly("[onReady] config option1", { option1: this.config.option1 });
+		this.log.silly("[onReady] config option2", { option2: this.config.option2 });
 
 		/*
 		For every state in the system there has to be also an object of type state
@@ -56,9 +56,11 @@ class CarrierMideaComfeeAndMoreLocal extends utils.Adapter {
 			},
 			native: {},
 		});
+		this.log.silly("[onReady] testVariable object created");
 
 		// In order to get state updates, you need to subscribe to them. The following line adds a subscription for our variable we have created above.
 		this.subscribeStates("testVariable");
+		this.log.silly("[onReady] Subscribed to testVariable");
 		// You can also add a subscription for multiple states. The following line watches all states starting with "lights."
 		// this.subscribeStates("lights.*");
 		// Or, if you really must, you can also watch all states. Don't do this if you don't need to. Otherwise this will cause a lot of unnecessary load on the system:
@@ -70,20 +72,23 @@ class CarrierMideaComfeeAndMoreLocal extends utils.Adapter {
 		*/
 		// the variable testVariable is set to true as command (ack=false)
 		await this.setStateAsync("testVariable", true);
+		this.log.silly("[onReady] testVariable set to true (ack=false)");
 
 		// same thing, but the value is flagged "ack"
 		// ack should be always set to true if the value is received from or acknowledged from the target system
 		await this.setStateAsync("testVariable", { val: true, ack: true });
+		this.log.silly("[onReady] testVariable set to true (ack=true)");
 
 		// same thing, but the state is deleted after 30s (getState will return null afterwards)
 		await this.setStateAsync("testVariable", { val: true, ack: true, expire: 30 });
+		this.log.silly("[onReady] testVariable set to true (ack=true, expire=30)");
 
 		// examples for the checkPassword/checkGroup functions
 		let result = await this.checkPasswordAsync("admin", "iobroker");
-		this.log.info("check user admin pw iobroker: " + result);
+		this.log.silly("[onReady] checkPasswordAsync", { result });
 
 		result = await this.checkGroupAsync("admin", "admin");
-		this.log.info("check group user admin group admin: " + result);
+		this.log.silly("[onReady] checkGroupAsync", { result });
 
 		// === AC State Definitions ===
 		const acStates = [
@@ -98,20 +103,22 @@ class CarrierMideaComfeeAndMoreLocal extends utils.Adapter {
 		  { id: "turbo_mode", name: "Turbo Mode", type: "boolean", role: "switch.turbo" },
 		  { id: "available", name: "Available", type: "boolean", role: "indicator.reachable" }
 		];
+		this.log.silly("[onReady] acStates defined", { acStates });
 
 		for (const s of acStates) {
-		  await this.setObjectNotExistsAsync(s.id, {
-		    type: "state",
-		    common: {
-		      name: s.name,
-		      type: s.type,
-		      role: s.role,
-		      read: true,
-		      write: true
-		    },
-		    native: {},
+			this.log.silly("[onReady] Creating state object", { state: s });
+			await this.setObjectNotExistsAsync(s.id, {
+			type: "state",
+			common: {
+			  name: s.name,
+			  type: /** @type {"boolean"|"number"|"string"|"array"|"object"|"mixed"} */ (s.type),
+			  role: s.role,
+			  read: true,
+			  write: true
+			},
+			native: {},
 		  });
-		}
+		}  // ggf. das type durch type: s.type, ersetzten?
 
 		// Device-Konfiguration (später aus Adapter-Konfiguration holen!)
 		const deviceConfig = {
@@ -123,24 +130,36 @@ class CarrierMideaComfeeAndMoreLocal extends utils.Adapter {
 		  key: '93b236c3c0734f7db135df585966edcc9ad71753f089445caccec8db6d783181',
 		  protocol: 2
 		};
+		this.log.silly("[onReady] deviceConfig", { deviceConfig });
 
 		const ac = new AirConditioner(deviceConfig);
+		this.log.silly("[onReady] AirConditioner instance created", { ac });
 
 		// Status-Update Callback: Schreibe alle Werte in ioBroker
 		ac.registerUpdate(async (status) => {
+		  this.log.silly("[ac.registerUpdate] called", { status });
 		  for (const s of acStates) {
 		    if (status[s.id] !== undefined) {
+		      this.log.silly("[ac.registerUpdate] setStateAsync", { id: s.id, value: status[s.id] });
 		      await this.setStateAsync(s.id, { val: status[s.id], ack: true });
 		    }
 		  }
 		});
 
+		this.log.silly("[onReady] Opening AC connection");
 		// Verbindung aufbauen
 		ac.open();
 
+		this.log.silly("[onReady] Setting interval for refreshStatus");
 		// Optional: zyklisch Status abfragen (z.B. alle 30s)
 		setInterval(() => {
-		  if (ac.refreshStatus) ac.refreshStatus();
+		  this.log.silly("[setInterval] Refreshing AC status");
+		  if (ac.refreshStatus) {
+				this.log.silly("[setInterval] Calling ac.refreshStatus()");
+				ac.refreshStatus();
+			} else {
+				this.log.silly("[setInterval] ac.refreshStatus not available");
+			}
 		}, 30000);
 	}
 
@@ -149,6 +168,7 @@ class CarrierMideaComfeeAndMoreLocal extends utils.Adapter {
 	 * @param {() => void} callback
 	 */
 	onUnload(callback) {
+		this.log.silly("[onUnload] called");
 		try {
 			// Here you must clear all timeouts or intervals that may still be active
 			// clearTimeout(timeout1);
@@ -156,8 +176,10 @@ class CarrierMideaComfeeAndMoreLocal extends utils.Adapter {
 			// ...
 			// clearInterval(interval1);
 
+			this.log.silly("[onUnload] cleanup done");
 			callback();
 		} catch (e) {
+			this.log.silly("[onUnload] error", { error: e });
 			callback();
 		}
 	}
@@ -185,11 +207,10 @@ class CarrierMideaComfeeAndMoreLocal extends utils.Adapter {
 	 * @param {ioBroker.State | null | undefined} state
 	 */
 	onStateChange(id, state) {
+		this.log.silly("[onStateChange] called", { id, state });
 		if (state) {
-			// The state was changed
 			this.log.info(`state ${id} changed: ${state.val} (ack = ${state.ack})`);
 		} else {
-			// The state was deleted
 			this.log.info(`state ${id} deleted`);
 		}
 	}
@@ -219,8 +240,13 @@ if (require.main !== module) {
 	/**
 	 * @param {Partial<utils.AdapterOptions>} [options={}]
 	 */
-	module.exports = (options) => new CarrierMideaComfeeAndMoreLocal(options);
+	module.exports = (options) => {
+		// Silly log for compact mode
+		console.log("[EXPORT] Adapter exported in compact mode", options);
+		return new CarrierMideaComfeeAndMoreLocal(options);
+	};
 } else {
 	// otherwise start the instance directly
+	console.log("[MAIN] Starting adapter instance directly");
 	new CarrierMideaComfeeAndMoreLocal();
 }

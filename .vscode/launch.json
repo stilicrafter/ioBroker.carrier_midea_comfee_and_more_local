@@ -1,0 +1,17 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "node",
+            "request": "attach",
+            "name": "Attach to Remote DevServer",
+            "address": "iobdev", // ÄNDERE DIES, WENN DER SERVER NICHT LOKAL LÄUFT
+            "port": 9228,
+            "restart": true, // Optional: Versucht, sich erneut zu verbinden, wenn die Verbindung abbricht
+            "protocol": "inspector", // Standard für moderne Node.js Versionen
+             "localRoot": "${workspaceFolder}", // Stelle sicher, dass dies auf dein lokales Projektverzeichnis zeigt
+            // "remoteRoot": "/path/to/your/project/on/the/server" // NUR NÖTIG, WENN DIE PFADE ABWEICHEN
+        }
+        // ... andere Konfigurationen ...
+    ]
+}

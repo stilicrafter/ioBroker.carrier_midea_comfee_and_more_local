@@ -6,6 +6,8 @@
       "request": "launch",
       "name": "Start main.js",
       "program": "${workspaceFolder}/main.js",
+      "runtimeArgs": ["--inspect-brk"],
+      "args":["--debug"], 
       "skipFiles": ["<node_internals>/**"],
       "console": "integratedTerminal"
     },

@@ -67,7 +67,7 @@
 		},
 		"platform": "Javascript/Node.js",
 		"icon": "carrier_midea_comfee_and_more_local.jpg",
-		"enabled": true,
+		"enabled": false,
 		"extIcon": "https://raw.githubusercontent.com/stilicrafter/ioBroker.carrier_midea_comfee_and_more_local/main/admin/carrier_midea_comfee_and_more_local.jpg",
 		"readme": "https://github.com/stilicrafter/ioBroker.carrier_midea_comfee_and_more_local/blob/main/README.md",
 		"loglevel": "info",

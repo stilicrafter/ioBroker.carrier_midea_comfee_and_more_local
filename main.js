@@ -11,7 +11,6 @@ const { AirConditioner } = require('./lib/devices/air-conditioner');
 
 // Load your modules here, e.g.:
 // const fs = require("fs");
-debugger;
 class CarrierMideaComfeeAndMoreLocal extends utils.Adapter {
 
 	/**
@@ -37,7 +36,7 @@ class CarrierMideaComfeeAndMoreLocal extends utils.Adapter {
 	async onReady() {
 		this.log.silly("[onReady] called", { config: this.config });
 
-		this.log.silly("[onReady] config option1", { option1: this.config.option1 });
+		this.log.debug("[onReady] config option1", { option1: this.config.option1 });
 		this.log.silly("[onReady] config option2", { option2: this.config.option2 });
 
 		/*
@@ -132,11 +131,11 @@ class CarrierMideaComfeeAndMoreLocal extends utils.Adapter {
 		};
 		this.log.silly("[onReady] deviceConfig", { deviceConfig });
 
-		const ac = new AirConditioner(deviceConfig);
+		this.ac = new AirConditioner(deviceConfig);
 		this.log.silly("[onReady] AirConditioner instance created", { ac });
 
 		// Status-Update Callback: Schreibe alle Werte in ioBroker
-		ac.registerUpdate(async (status) => {
+		this.ac.registerUpdate(async (status) => {
 		  this.log.silly("[ac.registerUpdate] called", { status });
 		  for (const s of acStates) {
 		    if (status[s.id] !== undefined) {
@@ -148,15 +147,15 @@ class CarrierMideaComfeeAndMoreLocal extends utils.Adapter {
 
 		this.log.silly("[onReady] Opening AC connection");
 		// Verbindung aufbauen
-		ac.open();
+		this.ac.open();
 
 		this.log.silly("[onReady] Setting interval for refreshStatus");
 		// Optional: zyklisch Status abfragen (z.B. alle 30s)
 		setInterval(() => {
 		  this.log.silly("[setInterval] Refreshing AC status");
-		  if (ac.refreshStatus) {
+		  if (this.ac.refreshStatus) {
 				this.log.silly("[setInterval] Calling ac.refreshStatus()");
-				ac.refreshStatus();
+				this.ac.refreshStatus();
 			} else {
 				this.log.silly("[setInterval] ac.refreshStatus not available");
 			}
@@ -175,7 +174,7 @@ class CarrierMideaComfeeAndMoreLocal extends utils.Adapter {
 			// clearTimeout(timeout2);
 			// ...
 			// clearInterval(interval1);
-
+			this.ac.close()
 			this.log.silly("[onUnload] cleanup done");
 			callback();
 		} catch (e) {

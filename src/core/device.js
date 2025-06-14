@@ -45,162 +45,178 @@ class MideaDevice extends EventEmitter {
    * @param {string} token - Token (hex string)
    * @param {string} key - Key (hex string)
    * @param {number} protocol - Protocol version
-   * @param {string} model - Device model
-   * @param {number} subtype - Device subtype
-   * @param {Object} attributes - Initial attributes
+   * @param {string} model - Model
+   * @param {number} subtype - Subtype
+   * @param {Object} attributes - Device attributes
    */
   constructor(name, deviceId, deviceType, ipAddress, port, token, key, protocol, model, subtype, attributes) {
     super();
-    this._name = name;
-    this._deviceId = deviceId;
-    this._deviceType = deviceType;
+    this._attributes = attributes || {};
+    this._socket = null;
     this._ipAddress = ipAddress;
     this._port = port;
+    this._security = new LocalSecurity();
+    this._token = token ? Buffer.from(token, 'hex') : null;
+    this._key = key ? Buffer.from(key, 'hex') : null;
+    this._buffer = Buffer.alloc(0);
+    this._deviceName = name;
+    this._deviceId = deviceId;
+    this._deviceType = deviceType;
     this._protocol = protocol;
     this._model = model;
     this._subtype = subtype;
-    this._attributes = attributes || {};
+    this._protocolVersion = 0;
+    this._updates = [];
+    this._unsupportedProtocol = [];
+    this._isRunning = false;
+    this._available = true;
+    this._applianceQuery = true;
+    this._refreshInterval = 30;
+    this._heartbeatInterval = 10;
+    this._defaultRefreshInterval = 30;
+  }
 
-    this._security = new LocalSecurity(token, key);
-    this._socket = null;
-    this._buffer = Buffer.alloc(0); // Buffer to store incoming data
-    this._waitingForResponse = null; // Promise resolver for sendCommand
-    this._responseTimeout = null; // Timeout for sendCommand
-    this._retries = 0;
-    this._isConnecting = false; // Flag to prevent multiple connection attempts
-    this._isRunning = false; // Flag to indicate if the _run loop is active
+  /**
+   * Get device name
+   * @returns {string} - Device name
+   */
+  get name() {
+    return this._deviceName;
+  }
 
-    // Bind methods to this instance
-    this.handleSocketClose = this.handleSocketClose.bind(this);
-    this.handleSocketError = this.handleSocketError.bind(this);
+  /**
+   * Get device availability
+   * @returns {boolean} - Device availability
+   */
+  get available() {
+    return this._available;
+  }
+
+  /**
+   * Get device ID
+   * @returns {number} - Device ID
+   */
+  get deviceId() {
+    return this._deviceId;
+  }
+
+  /**
+   * Get device type
+   * @returns {number} - Device type
+   */
+  get deviceType() {
+    return this._deviceType;
+  }
+
+  /**
+   * Get device model
+   * @returns {string} - Device model
+   */
+  get model() {
+    return this._model;
+  }
+
+  /**
+   * Get device subtype
+   * @returns {number} - Device subtype
+   */
+  get subtype() {
+    return this._subtype;
+  }
+
+  /**
+   * Extract v2 messages from buffer
+   * @param {Buffer} msg - Message buffer
+   * @returns {Array} - Array of [messages, remaining buffer]
+   */
+  static fetchV2Message(msg) {
+    const result = [];
+    let remainingMsg = Buffer.from(msg);
+    
+    while (remainingMsg.length > 0) {
+      const factualMsgLen = remainingMsg.length;
+      if (factualMsgLen < 6) {
+        break;
+      }
+      
+      const allegedMsgLen = remainingMsg[4] + (remainingMsg[5] << 8);
+      
+      if (factualMsgLen >= allegedMsgLen) {
+        result.push(remainingMsg.slice(0, allegedMsgLen));
+        remainingMsg = remainingMsg.slice(allegedMsgLen);
+      } else {
+        break;
+      }
+    }
+    
+    return [result, remainingMsg];
   }
 
   /**
    * Connect to the device
    * @param {boolean} refreshStatus - Whether to refresh status after connection
-   * @returns {Promise<boolean>} - True if connected and authenticated
+   * @returns {boolean} - Connection success
    */
-  connect(refreshStatus = false) {
-    return new Promise((resolve, reject) => {
-      if (this._socket && !this._socket.destroyed) {
-        // Already connected
-        console.debug(`[${this._deviceId}] Already connected.`);
-        return resolve(true);
-      }
-
-      if (this._isConnecting) {
-        console.debug(`[${this._deviceId}] Already connecting...`);
-        return resolve(false); // Or reject, depending on desired behavior
-      }
-
-      this._isConnecting = true;
+  connect(refreshStatus = true) {
+    try {
       this._socket = new net.Socket();
-      this._socket.setTimeout(60000); // 60 seconds timeout for inactivity
-
-      this._socket.on('close', this.handleSocketClose);
-      this._socket.on('error', this.handleSocketError);
-
-      // *******************************************************************
-      // WICHTIG: Den 'data'-Handler HIER registrieren, NUR EINMAL pro Socket!
-      // *******************************************************************
-      this._socket.on('data', (data) => {
-        try {
-          const msgLen = data.length;
-          if (msgLen === 0) {
-            console.warn(`[${this._deviceId}] Received empty data packet.`);
-            this.closeSocket();
-            return;
-          }
-          console.debug(`[${this._deviceId}] Received ${msgLen} bytes of data.`);
-
-          const result = this.parseMessage(data);
-
-          if (result === ParseMessageResult.ERROR) {
-            console.debug(`[${this._deviceId}] Message 'ERROR' received or parsing error.`);
-            this.closeSocket();
-          } else if (result === ParseMessageResult.SUCCESS) {
-            // Message successfully parsed and processed.
-            // If there was a pending response for sendCommand, resolve it here.
-            if (this._waitingForResponse) {
-                clearTimeout(this._responseTimeout); // Clear the timeout
-                this._waitingForResponse(); // Resolve the promise
-                this._waitingForResponse = null; // Reset for next command
-                this._responseTimeout = null;
+      this._socket.setTimeout(10000); // 10 seconds timeout
+      
+      console.debug(`[${this._deviceId}] Connecting to ${this._ipAddress}:${this._port}`);
+      
+      return new Promise((resolve, reject) => {
+        // Handle connection
+        this._socket.connect(this._port, this._ipAddress, async () => {
+          console.debug(`[${this._deviceId}] Connected`);
+          
+          try {
+            if (this._protocol === 3) {
+              await this.authenticate();
             }
+            
+            console.debug(`[${this._deviceId}] Authentication success`);
+            
+            if (refreshStatus) {
+              await this.refreshStatus(true);
+            }
+            
+            this.enableDevice(true);
+            resolve(true);
+          } catch (error) {
+            this.enableDevice(false);
+            reject(error);
           }
-          // If result is PADDING, it means we need more data, so just wait.
-
-        } catch (error) {
-          console.error(`[${this._deviceId}] Error handling incoming data: ${error.message}`);
-          this.closeSocket(); // Close socket on data handling error
-        }
-      });
-
-      this._socket.connect(this._port, this._ipAddress, async () => {
-        console.debug(`[${this._deviceId}] Connected`);
-        this._isConnecting = false; // Reset connecting flag
-
-        try {
-          if (this._protocol === 3) {
-            await this.authenticate();
-          }
-
-          console.debug(`[${this._deviceId}] Authentication success`);
-
-          if (refreshStatus) {
-            await this.refreshStatus(true);
-          }
-
-          this.enableDevice(true);
-          resolve(true);
-        } catch (error) {
-          console.error(`[${this._deviceId}] Authentication or refresh failed: ${error.message}`);
+        });
+        
+        // Handle errors
+        this._socket.on('error', (error) => {
+          console.debug(`[${this._deviceId}] Connection error: ${error.message}`);
           this.enableDevice(false);
-          this.closeSocket(); // Close socket on auth/refresh error
           reject(error);
-        }
+        });
+        
+        // Handle timeout
+        this._socket.on('timeout', () => {
+          console.debug(`[${this._deviceId}] Connection timed out`);
+          this._socket.destroy();
+          this.enableDevice(false);
+          reject(new Error('Connection timed out'));
+        });
       });
-    });
-  }
-
-  /**
-   * Handle socket close event
-   */
-  handleSocketClose() {
-    console.debug(`[${this._deviceId}] Socket closed.`);
-    this.closeSocket();
-  }
-
-  /**
-   * Handle socket error event
-   * @param {Error} err - Error object
-   */
-  handleSocketError(err) {
-    console.error(`[${this._deviceId}] Socket error: ${err.message}`);
-    this.closeSocket(); // Close socket on error
-  }
-
-
-  /**
-   * Close the socket connection
-   */
-  closeSocket() {
-    if (this._socket) {
-      console.debug(`[${this._deviceId}] Closing socket.`);
-      this._socket.removeAllListeners(); // IMPORTANT: Remove all listeners to prevent memory leaks
-      this._socket.destroy(); // Destroy the socket
-      this._socket = null;
-      this._buffer = Buffer.alloc(0); // Clear buffer on close
-      this._isConnecting = false; // Reset connecting flag
-      this._retries = 0; // Reset retries
-      this._isRunning = false; // Stop the _run loop
+    } catch (error) {
+      if (error instanceof AuthException) {
+        console.debug(`[${this._deviceId}] Authentication failed`);
+      } else if (error instanceof ResponseException) {
+        console.debug(`[${this._deviceId}] Unexpected response received`);
+      } else if (error instanceof RefreshFailed) {
+        console.debug(`[${this._deviceId}] Refresh status is timed out`);
+      } else {
+        console.error(`[${this._deviceId}] Unknown error: ${error.stack || error.message}`);
+      }
+      
+      this.enableDevice(false);
+      return false;
     }
-    if (this._waitingForResponse) {
-        clearTimeout(this._responseTimeout);
-        this._waitingForResponse = null;
-        this._responseTimeout = null;
-    }
-    this.enableDevice(false); // Mark device as disabled
   }
 
   /**
@@ -208,188 +224,450 @@ class MideaDevice extends EventEmitter {
    * @returns {Promise<void>}
    */
   async authenticate() {
-    console.debug(`[${this._deviceId}] Authenticating with device...`);
-    const request = PacketBuilder.encode(this._deviceType, MSGTYPE_HANDSHAKE_REQUEST, Buffer.from([]), this._protocol);
-    const response = await this.sendCommand(MSGTYPE_HANDSHAKE_REQUEST, request);
-    if (!response || response.messageType !== MSGTYPE_HANDSHAKE_RESPONSE) {
-      throw new AuthException('Unexpected handshake response');
-    }
-    this._security.setSessionKey(response.payload);
-    console.debug(`[${this._deviceId}] Authentication successful.`);
-  }
-
-  /**
-   * Send a command to the device
-   * @param {number} messageType - Expected message type for response
-   * @param {Buffer} data - Command data
-   * @returns {Promise<Object>} - Decrypted response payload
-   */
-  sendCommand(messageType, data) {
+    const request = this._security.encode8370(this._token, MSGTYPE_HANDSHAKE_REQUEST);
+    console.debug(`[${this._deviceId}] Handshaking`);
+    
     return new Promise((resolve, reject) => {
-      if (!this._socket || this._socket.destroyed) {
-        return reject(new Error('Socket not connected.'));
-      }
-
-      console.debug(`[${this._deviceId}] Sending command (Type: ${messageType}) with ${data.length} bytes.`);
-      this._socket.write(this._security.encrypt(data));
-
-      // Set up a timeout for the response
-      this._responseTimeout = setTimeout(() => {
-        console.warn(`[${this._deviceId}] Command response timed out for message type ${messageType}.`);
-        this._waitingForResponse = null;
-        this._responseTimeout = null;
-        this.closeSocket(); // Close socket on timeout
-        reject(new ResponseException(`Command response timed out for message type ${messageType}`));
-      }, 5000); // 5 seconds timeout
-
-      // Store the resolve function to be called by the data handler
-      this._waitingForResponse = (responsePayload) => {
-          // This resolve is now triggered by parseMessage when a SUCCESS is received.
-          // The actual payload is passed through the attribute updates.
-          resolve(responsePayload); // We might need to adjust what's resolved here based on parseMessage.
-                                   // For now, it will resolve when *any* successful message is processed.
-                                   // A more robust solution would match the response to the request.
-      };
+      this._socket.write(request, (err) => {
+        if (err) {
+          reject(new AuthException(`Failed to send handshake: ${err.message}`));
+          return;
+        }
+        
+        this._socket.once('data', (response) => {
+          try {
+            if (response.length < 20) {
+              reject(new AuthException('Response too short'));
+              return;
+            }
+            
+            const handshakeResponse = response.slice(8, 72);
+            this._security.tcpKey(handshakeResponse, this._key);
+            resolve();
+          } catch (error) {
+            reject(new AuthException(`Authentication failed: ${error.message}`));
+          }
+        });
+      });
     });
   }
 
-
   /**
-   * Parse incoming messages
-   * @param {Buffer} data - Incoming data buffer
-   * @returns {ParseMessageResult} - Result of parsing
+   * Send message to the device
+   * @param {Buffer} data - Message data
    */
-  parseMessage(data) {
-    this._buffer = Buffer.concat([this._buffer, data]);
-    let result = ParseMessageResult.PADDING;
-    const [packets, remainingData] = this._security.decode8370(this._buffer);
-
-    if (packets.length === 0 && remainingData.length === this._buffer.length) {
-      // No complete packets yet, need more data
-      return ParseMessageResult.PADDING;
+  sendMessage(data) {
+    if (this._protocol === 3) {
+      this.sendMessageV3(data, MSGTYPE_ENCRYPTED_REQUEST);
+    } else {
+      this.sendMessageV2(data);
     }
-
-    this._buffer = remainingData;
-
-    for (const packet of packets) {
-      if (packet.toString('ascii') === 'ERROR') {
-        console.error(`[${this._deviceId}] Device returned ERROR message.`);
-        return ParseMessageResult.ERROR;
-      }
-      try {
-        const message = new MessageApplianceResponse(packet);
-        if (message.isValid) {
-          this.processMessage(message);
-          result = ParseMessageResult.SUCCESS;
-        } else {
-          console.warn(`[${this._deviceId}] Invalid message received: ${packet.toString('hex')}`);
-          result = ParseMessageResult.ERROR; // Treat invalid message as error for now
-        }
-      } catch (error) {
-        console.error(`[${this._deviceId}] Error parsing message: ${error.message}. Packet: ${packet.toString('hex')}`);
-        result = ParseMessageResult.ERROR;
-      }
-    }
-    return result;
   }
 
   /**
-   * Process a parsed message
-   * @param {Object} message - Parsed message object
+   * Send v2 message to the device
+   * @param {Buffer} data - Message data
    */
-  processMessage(message) {
-    // Default implementation does nothing, overridden by subclasses
-    // console.debug(`[${this._deviceId}] Processing message: ${JSON.stringify(message)}`);
+  sendMessageV2(data) {
+    if (this._socket && !this._socket.destroyed) {
+      this._socket.write(data);
+    } else {
+      console.debug(`[${this._deviceId}] Send failure, device disconnected, data: ${data.toString('hex')}`);
+    }
+  }
+
+  /**
+   * Send v3 message to the device
+   * @param {Buffer} data - Message data
+   * @param {number} msgType - Message type
+   */
+  sendMessageV3(data, msgType = MSGTYPE_ENCRYPTED_REQUEST) {
+    const encodedData = this._security.encode8370(data, msgType);
+    this.sendMessageV2(encodedData);
+  }
+
+  /**
+   * Build and send command
+   * @param {Object} cmd - Command object
+   */
+  buildSend(cmd) {
+    const data = cmd.serialize();
+    console.debug(`[${this._deviceId}] Sending: ${cmd}`);
+    const msg = new PacketBuilder(this._deviceId, data).finalize();
+    this.sendMessage(msg);
   }
 
   /**
    * Refresh device status
-   * @param {boolean} force - Force refresh
+   * @param {boolean} waitResponse - Whether to wait for response
    * @returns {Promise<void>}
    */
-  async refreshStatus(force = false) {
-    if (this._protocol === 3) {
-      console.debug(`[${this._deviceId}] Refreshing status...`);
-      const message = new MessageQueryAppliance(this._deviceType);
-      try {
-        await this.sendCommand(MessageType.QUERY, message.serialize());
-        console.debug(`[${this._deviceId}] Status refreshed successfully.`);
-      } catch (error) {
-        console.error(`[${this._deviceId}] Failed to refresh status: ${error.message}`);
-        throw new RefreshFailed(`Failed to refresh status: ${error.message}`);
-      }
-    } else {
-      console.warn(`[${this._deviceId}] Refresh status not supported for protocol ${this._protocol}.`);
+  async refreshStatus(waitResponse = false) {
+    let cmds = this.buildQuery();
+    
+    if (this._applianceQuery) {
+      cmds = [new MessageQueryAppliance(this.deviceType), ...cmds];
     }
-  }
-
-  /**
-   * Enable/disable the device
-   * @param {boolean} enable - True to enable, false to disable
-   */
-  enableDevice(enable) {
-    if (this._isRunning !== enable) {
-      this._isRunning = enable;
-      if (enable) {
-        this._run(); // Start the background loop
-      }
-    }
-  }
-
-  /**
-   * Background loop for device communication
-   */
-  async _run() {
-    let timeoutCounter = 0;
-    while (this._isRunning) {
-      try {
-        // If socket is not connected or destroyed, try to reconnect
-        if (!this._socket || this._socket.destroyed) {
-          console.debug(`[${this._deviceId}] Socket not connected, trying to reconnect.`);
+    
+    let errorCount = 0;
+    
+    for (const cmd of cmds) {
+      if (!this._unsupportedProtocol.includes(cmd.constructor.name)) {
+        this.buildSend(cmd);
+        
+        if (waitResponse) {
           try {
-            const connected = await this.connect();
-            if (!connected) {
-                // If connect returns false, it means another connect attempt is ongoing,
-                // or some other transient issue. Wait before retrying.
-                await new Promise(resolve => setTimeout(resolve, 5000));
-                continue; // Skip to next iteration of _run loop
-            }
+            await new Promise((resolve, reject) => {
+              const timeout = setTimeout(() => {
+                this._unsupportedProtocol.push(cmd.constructor.name);
+                console.debug(`[${this._deviceId}] Does not support the protocol ${cmd.constructor.name}, ignored`);
+                errorCount++;
+                reject(new Error('Timeout waiting for response'));
+              }, 5000); // 5 second timeout
+              
+              const dataHandler = (data) => {
+                try {
+                  const result = this.parseMessage(data);
+                  
+                  if (result === ParseMessageResult.SUCCESS) {
+                    clearTimeout(timeout);
+                    this._socket.removeListener('data', dataHandler);
+                    resolve();
+                  } else if (result === ParseMessageResult.ERROR) {
+                    clearTimeout(timeout);
+                    this._socket.removeListener('data', dataHandler);
+                    reject(new ResponseException());
+                  }
+                  // If PADDING, continue waiting
+                } catch (error) {
+                  clearTimeout(timeout);
+                  this._socket.removeListener('data', dataHandler);
+                  reject(error);
+                }
+              };
+              
+              this._socket.on('data', dataHandler);
+            });
           } catch (error) {
-            console.error(`[${this._deviceId}] Reconnection failed: ${error.message}. Retrying in 5s...`);
-            await new Promise(resolve => setTimeout(resolve, 5000));
-            continue; // Skip to next iteration of _run loop
+            errorCount++;
           }
         }
-
-        // If connected, send heartbeat or other periodic commands
-        // This part needs to be carefully designed to avoid busy-waiting.
-        // For now, sending a custom query as a heartbeat.
-        if (this._protocol === 3) {
-            try {
-                const message = new MessageQuestCustom(this._deviceType);
-                await this.sendCommand(MessageType.QUERY, message.serialize());
-                timeoutCounter = 0; // Reset timeout counter on successful communication
-            } catch (error) {
-                console.warn(`[${this._deviceId}] Heartbeat or custom query failed: ${error.message}`);
-            }
-        }
-
-        // Check for timeout
-        if (timeoutCounter >= 120) { // 120 seconds (2 minutes) without successful communication
-          console.debug(`[${this._deviceId}] Heartbeat timed out.`);
-          this.closeSocket();
-          break; // Exit the _run loop
-        }
-
-        // Wait a bit before next iteration
-        await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
-        timeoutCounter++;
-      } catch (error) {
-        console.error(`[${this._deviceId}] Unknown error in _run loop: ${error.stack || error.message}`);
-        this.closeSocket(); // Ensure socket is closed on any unhandled error in _run
+      } else {
+        errorCount++;
       }
     }
-    console.debug(`[${this._deviceId}] _run loop stopped.`);
+    
+    if (errorCount === cmds.length) {
+      throw new RefreshFailed();
+    }
+  }
+
+  /**
+   * Pre-process message
+   * @param {Buffer} msg - Message data
+   * @returns {boolean} - Whether to continue processing
+   */
+  preProcessMessage(msg) {
+    if (msg[9] === MessageType.QUERY_APPLIANCE) {
+      const message = new MessageApplianceResponse(msg);
+      this._applianceQuery = false;
+      console.debug(`[${this.deviceId}] Received: ${message}`);
+      this._protocolVersion = message.protocolVersion;
+      console.debug(`[${this._deviceId}] Device protocol version: ${this._protocolVersion}`);
+      return false;
+    }
+    return true;
+  }
+
+  /**
+   * Parse message
+   * @param {Buffer} msg - Message data
+   * @returns {number} - Parse result
+   */
+  parseMessage(msg) {
+    let messages, remainingBuffer;
+    
+    if (this._protocol === 3) {
+      [messages, this._buffer] = this._security.decode8370(Buffer.concat([this._buffer, msg]));
+    } else {
+      [messages, this._buffer] = MideaDevice.fetchV2Message(Buffer.concat([this._buffer, msg]));
+    }
+    
+    if (messages.length === 0) {
+      return ParseMessageResult.PADDING;
+    }
+    
+    for (const message of messages) {
+      if (message.equals(Buffer.from('ERROR'))) {
+        return ParseMessageResult.ERROR;
+      }
+      
+      const payloadLen = message[4] + (message[5] << 8) - 56;
+      const payloadType = message[2] + (message[3] << 8);
+      
+      if (payloadType === 0x1001 || payloadType === 0x0001) {
+        // Heartbeat detected
+        continue;
+      } else if (message.length > 56) {
+        const cryptographic = message.slice(40, -16);
+        
+        if (payloadLen % 16 === 0) {
+          try {
+            const decrypted = this._security.aesDecrypt(cryptographic);
+            let cont = true;
+            
+            if (this._applianceQuery) {
+              cont = this.preProcessMessage(decrypted);
+            }
+            
+            if (cont) {
+              const status = this.processMessage(decrypted);
+              
+              if (status && Object.keys(status).length > 0) {
+                this.updateAll(status);
+              } else {
+                console.debug(`[${this._deviceId}] Unidentified protocol`);
+              }
+            }
+          } catch (error) {
+            console.error(`[${this._deviceId}] Error in process message, msg = ${decrypted.toString('hex')}`);
+          }
+        } else {
+          console.warn(
+            `[${this._deviceId}] Illegal payload, ` +
+            `original message = ${msg.toString('hex')}, buffer = ${this._buffer.toString('hex')}, ` +
+            `8370 decoded = ${message.toString('hex')}, payload type = ${payloadType}, ` +
+            `alleged payload length = ${payloadLen}, factual payload length = ${cryptographic.length}`
+          );
+        }
+      } else {
+        console.warn(
+          `[${this._deviceId}] Illegal message, ` +
+          `original message = ${msg.toString('hex')}, buffer = ${this._buffer.toString('hex')}, ` +
+          `8370 decoded = ${message.toString('hex')}, payload type = ${payloadType}, ` +
+          `alleged payload length = ${payloadLen}, message length = ${message.length}`
+        );
+      }
+    }
+    
+    return ParseMessageResult.SUCCESS;
+  }
+
+  /**
+   * Build query commands
+   * @returns {Array} - Array of query commands
+   */
+  buildQuery() {
+    throw new Error('Not implemented');
+  }
+
+  /**
+   * Process message
+   * @param {Buffer} msg - Message data
+   * @returns {Object} - Processed status
+   */
+  processMessage(msg) {
+    throw new Error('Not implemented');
+  }
+
+  /**
+   * Send command to the device
+   * @param {number} cmdType - Command type
+   * @param {Buffer} cmdBody - Command body
+   */
+  sendCommand(cmdType, cmdBody) {
+    try {
+      const cmd = new MessageQuestCustom(this._deviceType, this._protocolVersion, cmdType, cmdBody);
+      this.buildSend(cmd);
+    } catch (error) {
+      console.debug(
+        `[${this._deviceId}] Interface send_command failure, ${error.message}, ` +
+        `cmd_type: ${cmdType}, cmd_body: ${cmdBody.toString('hex')}`
+      );
+    }
+  }
+
+  /**
+   * Send heartbeat to the device
+   */
+  sendHeartbeat() {
+    const msg = new PacketBuilder(this._deviceId, Buffer.from([0x00])).finalize(0);
+    this.sendMessage(msg);
+  }
+
+  /**
+   * Register update callback
+   * @param {Function} update - Update callback
+   */
+  registerUpdate(update) {
+    this._updates.push(update);
+  }
+
+  /**
+   * Update all registered callbacks
+   * @param {Object} status - Status object
+   */
+  updateAll(status) {
+    console.debug(`[${this._deviceId}] Status update: ${JSON.stringify(status)}`);
+    
+    for (const update of this._updates) {
+      update(status);
+    }
+  }
+
+  /**
+   * Enable or disable the device
+   * @param {boolean} available - Whether the device is available
+   */
+  enableDevice(available = true) {
+    this._available = available;
+    const status = { available };
+    this.updateAll(status);
+  }
+
+  /**
+   * Open connection to the device
+   */
+  open() {
+    if (!this._isRunning) {
+      this._isRunning = true;
+      this._run();
+    }
+  }
+
+  /**
+   * Close connection to the device
+   */
+  close() {
+    if (this._isRunning) {
+      this._isRunning = false;
+      this.closeSocket();
+    }
+  }
+
+  /**
+   * Close socket connection
+   */
+  closeSocket() {
+    this._unsupportedProtocol = [];
+    this._buffer = Buffer.alloc(0);
+    
+    if (this._socket) {
+      this._socket.destroy();
+      this._socket = null;
+    }
+  }
+
+  /**
+   * Set device IP address
+   * @param {string} ipAddress - IP address
+   */
+  setIpAddress(ipAddress) {
+    if (this._ipAddress !== ipAddress) {
+      console.debug(`[${this._deviceId}] Update IP address to ${ipAddress}`);
+      this._ipAddress = ipAddress;
+      this.closeSocket();
+    }
+  }
+
+  /**
+   * Set refresh interval
+   * @param {number} refreshInterval - Refresh interval in seconds
+   */
+  setRefreshInterval(refreshInterval) {
+    this._refreshInterval = refreshInterval;
+  }
+
+  /**
+   * Run device communication loop
+   */
+  async _run() {
+    while (this._isRunning) {
+      while (!this._socket) {
+        try {
+          await this.connect(true);
+        } catch (error) {
+          if (!this._isRunning) {
+            return;
+          }
+          
+          this.closeSocket();
+          await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds before retry
+        }
+      }
+      
+      let timeoutCounter = 0;
+      const start = Date.now();
+      let previousRefresh = start;
+      let previousHeartbeat = start;
+      
+      // Set socket timeout to 1 second for more responsive handling
+      this._socket.setTimeout(1000);
+      
+      try {
+        // Set up data handler
+        this._socket.on('data', (data) => {
+          try {
+            const msgLen = data.length;
+            
+            if (msgLen === 0) {
+              throw new Error('Connection closed by peer');
+            }
+            
+            const result = this.parseMessage(data);
+            
+            if (result === ParseMessageResult.ERROR) {
+              console.debug(`[${this._deviceId}] Message 'ERROR' received`);
+              this.closeSocket();
+            } else if (result === ParseMessageResult.SUCCESS) {
+              timeoutCounter = 0;
+            }
+          } catch (error) {
+            console.error(`[${this._deviceId}] Error handling data: ${error.message}`);
+            this.closeSocket();
+          }
+        });
+        
+        // Main communication loop
+        while (this._socket && !this._socket.destroyed && this._isRunning) {
+          const now = Date.now();
+          
+          // Refresh status if needed
+          if (this._refreshInterval > 0 && now - previousRefresh >= this._refreshInterval * 1000) {
+            try {
+              await this.refreshStatus();
+              previousRefresh = now;
+            } catch (error) {
+              console.debug(`[${this._deviceId}] Refresh failed: ${error.message}`);
+            }
+          }
+          
+          // Send heartbeat if needed
+          if (now - previousHeartbeat >= this._heartbeatInterval * 1000) {
+            try {
+              this.sendHeartbeat();
+              previousHeartbeat = now;
+            } catch (error) {
+              console.debug(`[${this._deviceId}] Heartbeat failed: ${error.message}`);
+            }
+          }
+          
+          // Check for timeout
+          if (timeoutCounter >= 120) {
+            console.debug(`[${this._deviceId}] Heartbeat timed out`);
+            this.closeSocket();
+            break;
+          }
+          
+          // Wait a bit before next iteration
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          timeoutCounter++;
+        }
+      } catch (error) {
+        console.error(`[${this._deviceId}] Unknown error: ${error.stack || error.message}`);
+        this.closeSocket();
+      }
+    }
   }
 
   /**
@@ -433,17 +711,9 @@ class MideaDevice extends EventEmitter {
   }
 }
 
-// Export constants for message parsing results
-const ParseMessageResult = {
-  SUCCESS: 0,
-  PADDING: 1,
-  ERROR: 2,
-};
-
 module.exports = {
-  MideaDevice,
   AuthException,
   ResponseException,
   RefreshFailed,
-  ParseMessageResult
+  MideaDevice
 };

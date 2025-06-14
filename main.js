@@ -11,7 +11,7 @@ const { AirConditioner } = require('./lib/devices/air-conditioner');
 
 // Load your modules here, e.g.:
 // const fs = require("fs");
-
+debugger;
 class CarrierMideaComfeeAndMoreLocal extends utils.Adapter {
 
 	/**
